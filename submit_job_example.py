@@ -13,7 +13,7 @@ def submit_job(blend_file_path, start_frame, end_frame, server_url="http://local
 
 if __name__ == "__main__":
     # Example usage
-    result = submit_job("jobs\Spaceship Project.blend", 1, 10)
+    result = submit_job("jobs\Spaceship_Project.blend", 1, 10)
     print(result)
     print(f"Job ID: {result['job_id']}")
     print("You can check the job status at:")
