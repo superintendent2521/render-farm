@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Render Farm Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .dashboard {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .metric {
+            background: white;
+            padding: 20px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .metric h2 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .jobs-list {
+            margin-top: 30px;
+        }
+        .job-item {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .job-name {
+            font-weight: bold;
+            font-size: 1.2em;
+        }
+        .job-progress {
+            margin-top: 10px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .progress-fill {
+            height: 100%;
+            background-color: #007bff;
+            transition: width 0.3s ease;
+        }
+        .error {
+            color: red;
+            padding: 10px;
+            background: #ffe6e6;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <h1>Render Farm Dashboard</h1>
+        
+        <div class="metric">
+            <h2>Total Frames</h2>
+            <div class="metric-value" id="total-frames">Loading...</div>
+        </div>
+        
+        <div class="metric">
+            <h2>Rendered Frames Remaining</h2>
+            <div class="metric-value" id="frames-remaining">Loading...</div>
+        </div>
+        
+        <div class="metric">
+            <h2>Active Workers</h2>
+            <div class="metric-value" id="worker-count">Loading...</div>
+        </div>
+        
+        <div class="jobs-list">
+            <h2>Job Progress</h2>
+            <div id="jobs-container">Loading...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        
+        async function fetchData() {
+            try {
+                // Fetch total frames and completed frames
+                const progressResponse = await fetch(`${API_BASE}/progress/total_frames_done`);
+                const progressData = await progressResponse.json();
+                
+                // Fetch workers
+                const workersResponse = await fetch(`${API_BASE}/workers/`);
+                const workers = await workersResponse.json();
+                
+                // Fetch all jobs progress
+                const jobsResponse = await fetch(`${API_BASE}/progress/all_jobs`);
+                const jobs = await jobsResponse.json();
+                
+                updateDashboard(progressData, workers, jobs);
+            } catch (error) {
+                console.error('Error fetching data:', error);
+                document.getElementById('total-frames').textContent = 'Error';
+                document.getElementById('frames-remaining').textContent = 'Error';
+                document.getElementById('worker-count').textContent = 'Error';
+                document.getElementById('jobs-container').innerHTML = '<div class="error">Failed to load data from server</div>';
+            }
+        }
+        
+        function updateDashboard(progressData, workers, jobs) {
+            // Update total frames
+            document.getElementById('total-frames').textContent = progressData.total_frames;
+            
+            // Calculate remaining frames
+            const remaining = progressData.total_frames - progressData.total_frames_completed;
+            document.getElementById('frames-remaining').textContent = remaining;
+            
+            // Count active workers (status is "idle" or "busy")
+            const activeWorkers = workers.filter(w => w.status === 'idle' || w.status === 'busy');
+            document.getElementById('worker-count').textContent = activeWorkers.length;
+            
+            // Update jobs list
+            const jobsContainer = document.getElementById('jobs-container');
+            if (jobs.length === 0) {
+                jobsContainer.innerHTML = '<p>No jobs found</p>';
+            } else {
+                jobsContainer.innerHTML = jobs.map(job => `
+                    <div class="job-item">
+                        <div class="job-name">${job.job_name}</div>
+                        <div>Total: ${job.total_frames} frames</div>
+                        <div>Completed: ${job.completed_frames} | Pending: ${job.pending_frames} | Failed: ${job.failed_frames}</div>
+                        <div class="job-progress">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width: ${job.progress_percentage}%"></div>
+                            </div>
+                            <div>${job.progress_percentage.toFixed(1)}% complete</div>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+        
+        // Initial load
+        fetchData();
+        
+        // Refresh every 5 seconds
+        setInterval(fetchData, 5000);
+    </script>
+</body>
+</html>

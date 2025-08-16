@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  worker:
+    build: .
+    environment:
+      - SERVER_URL=http://localhost:8000
+      - WORKER_NAME=worker-1
+      # Optional: specify custom Blender URL
+      # - BLENDER_URL=https://download.blender.org/release/Blender4.2/blender-4.2.0-linux-x64.tar.xz
+    volumes:
+      - ./renders:/app/renders
+      - ./downloads:/app/downloads
+    restart: unless-stopped
