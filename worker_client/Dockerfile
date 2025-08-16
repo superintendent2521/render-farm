@@ -1,7 +1,7 @@
 FROM python:3.9-slim
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     curl \
     unzip \
@@ -14,6 +14,7 @@ RUN apt-get update && apt-get install -y \
     libxext6 \
     libxrender1 \
     libgomp1 \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
