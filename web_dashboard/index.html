@@ -11,7 +11,7 @@
             background-color: #f5f5f5;
         }
         .dashboard {
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
         }
         .metric {
@@ -66,11 +66,86 @@
             border-radius: 4px;
             margin: 10px 0;
         }
+        .upload-section {
+            background: white;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin: 15px 0;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        .btn {
+            background: #007bff;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .btn:hover {
+            background: #0056b3;
+        }
+        .file-input {
+            margin: 10px 0;
+        }
     </style>
 </head>
 <body>
     <div class="dashboard">
         <h1>Render Farm Dashboard</h1>
+        
+        <!-- Upload Section -->
+        <div class="upload-section">
+            <h2>Upload New Job</h2>
+            <form id="upload-form">
+                <div class="form-group">
+                    <label for="job-name">Job Name:</label>
+                    <input type="text" id="job-name" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="blend-file">Blender File:</label>
+                    <input type="file" id="blend-file" accept=".blend" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="start-frame">Start Frame:</label>
+                    <input type="number" id="start-frame" min="1" value="1" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="end-frame">End Frame:</label>
+                    <input type="number" id="end-frame" min="1" value="250" required>
+                </div>
+                
+                <div class="form-group">
+                    <label for="output-format">Output Format:</label>
+                    <select id="output-format">
+                        <option value="PNG">PNG</option>
+                        <option value="JPEG">JPEG</option>
+                        <option value="EXR">EXR</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn">Upload & Start Job</button>
+            </form>
+            <div id="upload-status"></div>
+        </div>
         
         <div class="metric">
             <h2>Total Frames</h2>
@@ -95,6 +170,53 @@
 
     <script>
         const API_BASE = 'http://localhost:8000';
+        
+        // Upload form handler
+        document.getElementById('upload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const formData = new FormData();
+            const fileInput = document.getElementById('blend-file');
+            const jobName = document.getElementById('job-name').value;
+            const startFrame = parseInt(document.getElementById('start-frame').value);
+            const endFrame = parseInt(document.getElementById('end-frame').value);
+            const outputFormat = document.getElementById('output-format').value;
+            
+            // Calculate total frames
+            const totalFrames = endFrame - startFrame + 1;
+            
+            // Create job object matching JobCreate model
+            const jobData = {
+                name: jobName,
+                total_frames: totalFrames,
+                output_format: outputFormat
+            };
+            
+            // Add job data as JSON string
+            formData.append('job', JSON.stringify(jobData));
+            formData.append('file', fileInput.files[0]);
+            
+            const statusDiv = document.getElementById('upload-status');
+            statusDiv.innerHTML = 'Uploading...';
+            
+            try {
+                const response = await fetch(`${API_BASE}/jobs/`, {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (response.ok) {
+                    statusDiv.innerHTML = '<div style="color: green;">Job uploaded successfully!</div>';
+                    document.getElementById('upload-form').reset();
+                    fetchData(); // Refresh job list
+                } else {
+                    const error = await response.json();
+                    statusDiv.innerHTML = `<div class="error">Upload failed: ${error.detail}</div>`;
+                }
+            } catch (error) {
+                statusDiv.innerHTML = `<div class="error">Upload failed: ${error.message}</div>`;
+            }
+        });
         
         async function fetchData() {
             try {

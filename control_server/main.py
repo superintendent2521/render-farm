@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -44,30 +44,34 @@ async def startup_event():
     create_tables()
 
 @app.post("/jobs/", response_model=JobResponse)
-async def create_job(job: JobCreate, file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def create_job(job: str = Form(...), file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Create a new render job and upload the blender file."""
     if not file.filename.endswith('.blend'):
         raise HTTPException(status_code=400, detail="File must be a .blend file")
     
+    # Parse job data from JSON string
+    job_data = json.loads(job)
+    job_create = JobCreate(**job_data)
+    
     # Save the blender file
-    file_path = os.path.join(BLENDER_FILES_DIR, f"{job.name}_{file.filename}")
+    file_path = os.path.join(BLENDER_FILES_DIR, f"{job_create.name}_{file.filename}")
     with open(file_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
     
     # Create job
     db_job = Job(
-        name=job.name,
+        name=job_create.name,
         blender_file_path=file_path,
-        total_frames=job.total_frames,
-        output_format=job.output_format,
-        scene_name=job.scene_name
+        total_frames=job_create.total_frames,
+        output_format=job_create.output_format,
+        scene_name=job_create.scene_name
     )
     db.add(db_job)
     db.commit()
     db.refresh(db_job)
     
     # Create frame records
-    for frame_num in range(1, job.total_frames + 1):
+    for frame_num in range(1, job_create.total_frames + 1):
         frame = Frame(
             job_id=db_job.id,
             frame_number=frame_num,
