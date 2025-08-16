@@ -175,6 +175,7 @@ async def poll_for_job(worker_id: int, db: Session = Depends(get_db)):
     
     # Find pending job
     pending_job = db.query(Job).filter(Job.status == "pending").first()
+    pending_frames = []  # Initialize to empty list
     if not pending_job:
         # Check for running jobs with pending frames
         running_job = db.query(Job).filter(Job.status == "running").first()
@@ -186,9 +187,21 @@ async def poll_for_job(worker_id: int, db: Session = Depends(get_db)):
             
             if pending_frames:
                 pending_job = running_job
+    else:
+        # Get pending frames for the pending job
+        pending_frames = db.query(Frame).filter(
+            Frame.job_id == pending_job.id,
+            Frame.status == "pending"
+        ).all()
     
     if not pending_job or not pending_frames:
-        return {"job_id": None, "frame_ranges": [], "blender_file_url": None}
+        return JobAssignment(
+            job_id=None,
+            frame_ranges=[],
+            blender_file_url=None,
+            output_format="PNG",  # Default value
+            scene_name=None
+        )
     
     # Start job if it's pending
     if pending_job.status == "pending":

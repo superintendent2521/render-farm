@@ -77,8 +77,8 @@ class FrameRange(BaseModel):
     end: int
 
 class JobAssignment(BaseModel):
-    job_id: int
+    job_id: Optional[int]
     frame_ranges: List[FrameRange]
-    blender_file_url: str
+    blender_file_url: Optional[str]
     output_format: str
     scene_name: Optional[str]
