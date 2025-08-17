@@ -25,6 +25,8 @@ class JobInfo(BaseModel):
     blend_file_url: str
     frame_start: int
     frame_end: int
+    total_workers: int = 1
+    worker_id: int = 0
 
 def parse_info_file(info_path: str) -> tuple:
     """Parse the info.txt file to extract frame start and end"""
@@ -47,39 +49,69 @@ def scan_jobs():
     """Scan the jobs directory for new jobs"""
     global available_jobs
     
-    with jobs_lock:
-        # Clear the current list
-        available_jobs = []
-        
-        # Scan jobs directory
-        jobs_dir = Path("jobs")
-        if jobs_dir.exists():
-            for job_folder in jobs_dir.iterdir():
-                if job_folder.is_dir():
-                    # Look for info.txt and .blend file
-                    info_file = job_folder / "info.txt"
-                    blend_files = list(job_folder.glob("*.blend"))
+    # Clear the current list
+    available_jobs = []
+    
+    # Scan jobs directory
+    jobs_dir = Path("jobs")
+    if jobs_dir.exists():
+        for job_folder in jobs_dir.iterdir():
+            if job_folder.is_dir():
+                # Look for info.txt and .blend file
+                info_file = job_folder / "info.txt"
+                blend_files = list(job_folder.glob("*.blend"))
+                
+                if info_file.exists() and blend_files:
+                    # Parse frame info
+                    frame_start, frame_end = parse_info_file(str(info_file))
                     
-                    if info_file.exists() and blend_files:
-                        # Parse frame info
-                        frame_start, frame_end = parse_info_file(str(info_file))
+                    # Check for worker count in info file
+                    total_workers = 1
+                    try:
+                        with open(info_file, 'r') as f:
+                            for line in f:
+                                if line.startswith('workers:'):
+                                    total_workers = int(line.split(':')[1].strip())
+                    except Exception as e:
+                        print(f"Error parsing worker count in {info_file}: {e}")
+                    
+                    # Move blend file to blend_files directory
+                    blend_file = blend_files[0]
+                    new_blend_path = Path("blend_files") / blend_file.name
+                    shutil.move(str(blend_file), str(new_blend_path))
+                    
+                    # Calculate frames per worker
+                    total_frames = frame_end - frame_start + 1
+                    frames_per_worker = total_frames // total_workers
+                    remainder = total_frames % total_workers
+                    
+                    # Create jobs for each worker
+                    for worker_id in range(total_workers):
+                        # Calculate frame range for this worker
+                        worker_frame_start = frame_start + (worker_id * frames_per_worker)
+                        worker_frame_end = worker_frame_start + frames_per_worker - 1
                         
-                        # Move blend file to blend_files directory
-                        blend_file = blend_files[0]
-                        new_blend_path = Path("blend_files") / blend_file.name
-                        shutil.move(str(blend_file), str(new_blend_path))
+                        # Distribute remainder frames among first few workers
+                        if worker_id < remainder:
+                            worker_frame_start += worker_id
+                            worker_frame_end += worker_id + 1
+                        else:
+                            worker_frame_start += remainder
+                            worker_frame_end += remainder
                         
                         # Add job to available jobs
                         job_info = {
                             "job_id": job_folder.name,
                             "blend_file_url": f"/blend_files/{blend_file.name}",
-                            "frame_start": frame_start,
-                            "frame_end": frame_end
+                            "frame_start": worker_frame_start,
+                            "frame_end": worker_frame_end,
+                            "total_workers": total_workers,
+                            "worker_id": worker_id
                         }
                         available_jobs.append(job_info)
-                        
-                        # Remove the job folder
-                        shutil.rmtree(str(job_folder))
+                    
+                    # Remove the job folder
+                    shutil.rmtree(str(job_folder))
 
 @app.get("/")
 async def root():

@@ -2,7 +2,7 @@ import os
 import shutil
 from pathlib import Path
 
-def create_test_job():
+def create_test_job(workers=1):
     """Create a test job with a blend file and info.txt"""
     # Create jobs directory if it doesn't exist
     os.makedirs("jobs", exist_ok=True)
@@ -12,8 +12,9 @@ def create_test_job():
     os.makedirs(job_folder, exist_ok=True)
     
     # Create a sample info.txt file
-    info_content = """framestart:10
+    info_content = f"""framestart:10
 frameend:150
+workers:{workers}
 """
     info_file = job_folder / "info.txt"
     with open(info_file, "w") as f:
@@ -27,4 +28,11 @@ frameend:150
     print(f"Created test job in {job_folder}")
 
 if __name__ == "__main__":
-    create_test_job()
+    import sys
+    workers = 1
+    if len(sys.argv) > 1:
+        try:
+            workers = int(sys.argv[1])
+        except ValueError:
+            print("Invalid number of workers, using default of 1")
+    create_test_job(workers)
