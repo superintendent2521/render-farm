@@ -18,11 +18,8 @@
 
 ## Implementation Plan
 
-- [x] Analyze existing server code
 - [x] Create jobs directory structure
 - [x] Implement job watching functionality
 - [x] Create endpoint to serve job information
 - [x] Implement static file serving for blend files
 - [x] Add job removal after processing
-- [x] Test the implementation
-- [x] Update requirements if needed
