@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import platform
+import posixpath
 import random
 import shutil
 import signal
@@ -111,8 +112,20 @@ def safe_extract_tar(archive: Path, target: Path) -> None:
     with tarfile.open(archive) as source:
         for item in source.getmembers():
             path = PurePosixPath(item.name)
-            if path.is_absolute() or ".." in path.parts or item.issym() or item.islnk():
-                raise WorkerError("Downloaded Blender archive contains an unsafe path or link")
+            if path.is_absolute() or ".." in path.parts:
+                raise WorkerError("Downloaded Blender archive contains an unsafe path")
+            if item.ischr() or item.isblk() or item.isfifo():
+                raise WorkerError("Downloaded Blender archive contains an unsafe special file")
+            if item.issym() or item.islnk():
+                link = PurePosixPath(item.linkname)
+                if link.is_absolute():
+                    raise WorkerError("Downloaded Blender archive contains an unsafe link")
+                # Symbolic link targets are relative to the link's directory. Tar
+                # hard-link targets are relative to the archive root.
+                base = path.parent if item.issym() else PurePosixPath()
+                resolved = posixpath.normpath(str(base / link))
+                if resolved == ".." or resolved.startswith("../"):
+                    raise WorkerError("Downloaded Blender archive contains an unsafe link")
         source.extractall(target)
 
 
