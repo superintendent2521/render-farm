@@ -76,4 +76,14 @@ def test_batch_leases_consecutive_frames_from_only_one_job(tmp_path):
     assert [lease["frame"] for lease in leases] == [1, 2]
     assert len({lease["job_id"] for lease in leases}) == 1
     assert len({lease["lease_token"] for lease in leases}) == 2
-    assert Scheduler(sessions).lease(worker)["frame"] == 10
+    assert Scheduler(sessions).lease(worker) is None
+
+
+def test_worker_cannot_hold_two_batches(tmp_path):
+    sessions, worker = setup_farm(tmp_path)
+    scheduler = Scheduler(sessions)
+
+    leases = scheduler.lease_batch(worker, 1)
+
+    assert len(leases) == 1
+    assert scheduler.lease_batch(worker, 1) == []

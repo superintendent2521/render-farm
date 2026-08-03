@@ -46,6 +46,15 @@ class Scheduler:
                 stale.lease_hash = None
                 stale.lease_expires_at = None
                 stale.status = FrameStatus.failed.value if stale.attempts >= 3 else FrameStatus.pending.value
+            # A duplicated service/notebook process must not acquire another
+            # batch with the same credential while its current batch is active.
+            active = db.scalar(select(Frame.id).where(
+                Frame.worker_id == worker.id,
+                Frame.status.in_([FrameStatus.leased.value, FrameStatus.rendering.value]),
+                Frame.lease_expires_at >= now,
+            ).limit(1))
+            if active:
+                return []
             job = db.scalar(
                 select(Job).join(Frame).where(
                     Frame.status == FrameStatus.pending.value,

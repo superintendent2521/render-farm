@@ -326,13 +326,25 @@ def render_batch(api: Api, config: dict, leases: list[dict]) -> None:
     logs: list[str] = []
     log_size = 0
     assert process.stdout
-    for line in process.stdout:
-        print(line, end="", flush=True)
-        logs.append(line)
-        log_size += len(line)
-        while log_size > 65536 and len(logs) > 1:
-            log_size -= len(logs.pop(0))
-    code = process.wait()
+    try:
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            logs.append(line)
+            log_size += len(line)
+            while log_size > 65536 and len(logs) > 1:
+                log_size -= len(logs.pop(0))
+        code = process.wait()
+    except BaseException:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        stopped.set()
+        thread.join(timeout=2)
+        raise
     log_text = "".join(logs)[-65536:]
     manifest.unlink(missing_ok=True)
     missing = [entry for entry in entries if not Path(entry["output"]).exists()]
@@ -383,6 +395,10 @@ def enroll(args) -> None:
 def run_worker(_args) -> None:
     config = load_config()
     api = Api(config)
+    if threading.current_thread() is threading.main_thread() and hasattr(signal, "SIGTERM"):
+        def stop_on_term(_signum, _frame):
+            raise KeyboardInterrupt
+        signal.signal(signal.SIGTERM, stop_on_term)
     print(f"Blend Farm worker {__version__} connected to {api.base}")
     while True:
         lease = None
