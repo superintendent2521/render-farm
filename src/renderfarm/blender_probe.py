@@ -3,6 +3,11 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
+
+# Blender runs scripts with its bundled Python and does not inherit the worker
+# interpreter's site-packages search path. Add the package root explicitly.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import bpy
 
