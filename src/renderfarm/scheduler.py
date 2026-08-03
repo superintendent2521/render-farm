@@ -34,6 +34,10 @@ class Scheduler:
         return changed
 
     def lease(self, worker: Worker):
+        leases = self.lease_batch(worker, 1)
+        return leases[0] if leases else None
+
+    def lease_batch(self, worker: Worker, count: int) -> list[dict]:
         with self.lock, self.sessions.begin() as db:
             now = utcnow()
             expired = db.scalars(select(Frame).where(Frame.status.in_([FrameStatus.leased.value, FrameStatus.rendering.value]), Frame.lease_expires_at < now)).all()
@@ -42,30 +46,38 @@ class Scheduler:
                 stale.lease_hash = None
                 stale.lease_expires_at = None
                 stale.status = FrameStatus.failed.value if stale.attempts >= 3 else FrameStatus.pending.value
-            frame = db.scalar(
-                select(Frame).join(Job).where(
+            job = db.scalar(
+                select(Job).join(Frame).where(
                     Frame.status == FrameStatus.pending.value,
                     Job.status.in_([JobStatus.queued.value, JobStatus.running.value]),
                 ).order_by(Job.queue_order.asc(), Job.created_at.asc(), Frame.frame_number.asc()).limit(1)
             )
-            if not frame:
-                return None
-            job = db.get(Job, frame.job_id)
-            raw_lease = secrets.token_urlsafe(32)
-            frame.status = FrameStatus.leased.value
-            frame.worker_id = worker.id
-            frame.attempts += 1
-            frame.lease_hash = token_hash(raw_lease)
-            frame.lease_expires_at = now + timedelta(seconds=60)
-            frame.started_at = now
+            if not job:
+                return []
+            frames = db.scalars(
+                select(Frame).where(
+                    Frame.job_id == job.id,
+                    Frame.status == FrameStatus.pending.value,
+                ).order_by(Frame.frame_number.asc()).limit(min(max(count, 1), 20))
+            ).all()
             if job.status == JobStatus.queued.value:
                 job.status = JobStatus.running.value
-            return {
-                "lease_token": raw_lease, "frame_id": frame.id, "job_id": job.id,
-                "frame": frame.frame_number, "output_format": job.output_format,
-                "package_sha256": job.package_sha256, "blend_path": job.blend_path,
-                "lease_expires_at": frame.lease_expires_at.isoformat(),
-            }
+            leases = []
+            for frame in frames:
+                raw_lease = secrets.token_urlsafe(32)
+                frame.status = FrameStatus.leased.value
+                frame.worker_id = worker.id
+                frame.attempts += 1
+                frame.lease_hash = token_hash(raw_lease)
+                frame.lease_expires_at = now + timedelta(seconds=60)
+                frame.started_at = now
+                leases.append({
+                    "lease_token": raw_lease, "frame_id": frame.id, "job_id": job.id,
+                    "frame": frame.frame_number, "output_format": job.output_format,
+                    "package_sha256": job.package_sha256, "blend_path": job.blend_path,
+                    "lease_expires_at": frame.lease_expires_at.isoformat(),
+                })
+            return leases
 
     def heartbeat(self, worker_id: str, raw_lease: str) -> Frame | None:
         with self.sessions.begin() as db:

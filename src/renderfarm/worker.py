@@ -52,7 +52,7 @@ def save_config(config: dict) -> None:
     os.replace(temp, CONFIG_FILE)
 
 
-def capabilities(device: str = "AUTO") -> dict:
+def capabilities(device: str = "AUTO", batch_size: int = 5) -> dict:
     gpu = "unknown"
     for command in (["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"], ["rocminfo"]):
         try:
@@ -65,7 +65,8 @@ def capabilities(device: str = "AUTO") -> dict:
     return {
         "worker_version": __version__, "os": platform.system(), "os_version": platform.version(),
         "architecture": platform.machine(), "cpu_count": os.cpu_count(), "gpu": gpu,
-        "render_device": device, "free_disk_bytes": shutil.disk_usage(CACHE_DIR.parent).free,
+        "render_device": device, "batch_size": batch_size,
+        "free_disk_bytes": shutil.disk_usage(CACHE_DIR.parent).free,
     }
 
 
@@ -260,46 +261,58 @@ def upload_artifact(api: Api, lease_token: str, path: Path, purpose: str, conten
     return init["id"]
 
 
-def render(api: Api, config: dict, lease: dict) -> None:
-    started = time.monotonic()
-    blender = ensure_blender(lease["blender_version"])
+def render_batch(api: Api, config: dict, leases: list[dict]) -> None:
+    batch_started = time.monotonic()
+    first = leases[0]
+    blender = ensure_blender(first["blender_version"])
     stopped = threading.Event()
     lease_lost = threading.Event()
     process_holder: list[subprocess.Popen] = []
 
     def heartbeats():
         while not stopped.wait(15):
-            try:
-                result = api.post("/api/v1/worker/heartbeat", {"lease_token":lease["lease_token"]}).json()
-                if result.get("lease_active") is False:
-                    lease_lost.set()
-                    if process_holder:
-                        process_holder[0].terminate()
-                    return
-            except httpx.HTTPStatusError as exc:
-                if exc.response.status_code == 401:
-                    lease_lost.set()
-                    if process_holder:
-                        process_holder[0].terminate()
-                    return
-                print(f"Heartbeat warning: {exc}", file=sys.stderr)
-            except Exception as exc:
-                print(f"Heartbeat warning: {exc}", file=sys.stderr)
+            for lease in leases:
+                try:
+                    result = api.post("/api/v1/worker/heartbeat", {"lease_token":lease["lease_token"]}).json()
+                    if result.get("lease_active") is False:
+                        lease_lost.set()
+                        if process_holder:
+                            process_holder[0].terminate()
+                        return
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code == 401:
+                        lease_lost.set()
+                        if process_holder:
+                            process_holder[0].terminate()
+                        return
+                    print(f"Heartbeat warning: {exc}", file=sys.stderr, flush=True)
+                except Exception as exc:
+                    print(f"Heartbeat warning: {exc}", file=sys.stderr, flush=True)
     thread = threading.Thread(target=heartbeats, daemon=True)
     thread.start()
     try:
-        project = download_project(api, lease)
+        project = download_project(api, first)
         trim_cache(int(config.get("cache_gb", 50)) * 1024**3, project)
-        blend = project.joinpath(*PurePosixPath(lease["blend_path"]).parts)
-        extension = {"PNG":"png","JPEG":"jpg","OPEN_EXR":"exr"}[lease["output_format"]]
-        output_dir = CACHE_DIR / "outputs" / lease["frame_id"]
-        shutil.rmtree(output_dir, ignore_errors=True)
-        output_dir.mkdir(parents=True)
-        output = output_dir / f"frame-{lease['frame']:06d}.{extension}"
-        preview = output_dir / f"frame-{lease['frame']:06d}-preview.jpg"
+        blend = project.joinpath(*PurePosixPath(first["blend_path"]).parts)
+        entries = []
+        for lease in leases:
+            extension = {"PNG":"png","JPEG":"jpg","OPEN_EXR":"exr"}[lease["output_format"]]
+            output_dir = CACHE_DIR / "outputs" / lease["frame_id"]
+            shutil.rmtree(output_dir, ignore_errors=True)
+            output_dir.mkdir(parents=True)
+            entries.append({
+                "frame": lease["frame"], "output_format": lease["output_format"],
+                "output": str(output_dir / f"frame-{lease['frame']:06d}.{extension}"),
+                "preview": str(output_dir / f"frame-{lease['frame']:06d}-preview.jpg"),
+            })
+        manifest_dir = CACHE_DIR / "outputs"
+        manifest_dir.mkdir(parents=True, exist_ok=True)
+        manifest = manifest_dir / f"batch-{leases[0]['frame_id']}.json"
+        manifest.write_text(json.dumps({"device": config.get("device", "AUTO"), "frames": entries}), encoding="utf-8")
         runner = Path(__file__).with_name("blender_runner.py")
-        command = [str(blender), "--disable-autoexec", "-b", str(blend), "--python-exit-code", "1", "--python", str(runner), "--", str(lease["frame"]), str(output), lease["output_format"], str(preview), config.get("device", "AUTO")]
-        print(f"Launching Blender for job {lease['job_id']} frame {lease['frame']}…", flush=True)
+        command = [str(blender), "--disable-autoexec", "-b", str(blend), "--python-exit-code", "1", "--python", str(runner), "--", str(manifest)]
+        frame_numbers = ", ".join(str(lease["frame"]) for lease in leases)
+        print(f"Launching Blender once for job {first['job_id']} frames {frame_numbers}…", flush=True)
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
         process_holder.append(process)
     except Exception:
@@ -309,28 +322,49 @@ def render(api: Api, config: dict, lease: dict) -> None:
     if lease_lost.is_set():
         stopped.set()
         thread.join(timeout=2)
-        raise WorkerError("Assignment was cancelled while preparing the project")
+        raise WorkerError("A batch assignment was cancelled while preparing the project")
     logs: list[str] = []
+    log_size = 0
     assert process.stdout
     for line in process.stdout:
-        print(line, end="")
+        print(line, end="", flush=True)
         logs.append(line)
-        if sum(map(len, logs)) > 65536:
-            logs = logs[len(logs)//2:]
+        log_size += len(line)
+        while log_size > 65536 and len(logs) > 1:
+            log_size -= len(logs.pop(0))
     code = process.wait()
     log_text = "".join(logs)[-65536:]
-    if code != 0 or not output.exists():
+    manifest.unlink(missing_ok=True)
+    missing = [entry for entry in entries if not Path(entry["output"]).exists()]
+    if code != 0 or missing or lease_lost.is_set():
         try:
-            api.post(f"/api/v1/worker/leases/{lease['frame_id']}/fail", {"error":f"Blender exited with code {code}","logs":log_text}, headers={"X-Lease-Token":lease["lease_token"]})
+            for lease in leases:
+                try:
+                    api.post(f"/api/v1/worker/leases/{lease['frame_id']}/fail", {"error":f"Blender batch exited with code {code}","logs":log_text}, headers={"X-Lease-Token":lease["lease_token"]})
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code != 409:
+                        raise
         finally:
             stopped.set()
             thread.join(timeout=2)
         return
     try:
-        output_id = upload_artifact(api, lease["lease_token"], output, "output", {"png":"image/png","jpg":"image/jpeg","exr":"image/x-exr"}[extension])
-        preview_id = upload_artifact(api, lease["lease_token"], preview, "preview", "image/jpeg") if preview.exists() else None
-        api.post(f"/api/v1/worker/leases/{lease['frame_id']}/complete", {"output_upload_id":output_id,"preview_upload_id":preview_id,"duration_seconds":time.monotonic()-started,"logs":log_text}, headers={"X-Lease-Token":lease["lease_token"]})
-        shutil.rmtree(output_dir, ignore_errors=True)
+        completed = []
+        for lease, entry in zip(leases, entries):
+            output = Path(entry["output"])
+            preview = Path(entry["preview"])
+            extension = output.suffix.removeprefix(".")
+            output_id = upload_artifact(api, lease["lease_token"], output, "output", {"png":"image/png","jpg":"image/jpeg","exr":"image/x-exr"}[extension])
+            preview_id = upload_artifact(api, lease["lease_token"], preview, "preview", "image/jpeg") if preview.exists() else None
+            completed.append((lease, entry, output_id, preview_id))
+        # Stop heartbeats before completing tokens; a completed lease is
+        # intentionally no longer active and must not cancel the rest of a batch.
+        stopped.set()
+        thread.join(timeout=2)
+        per_frame_duration = (time.monotonic() - batch_started) / len(leases)
+        for lease, entry, output_id, preview_id in completed:
+            api.post(f"/api/v1/worker/leases/{lease['frame_id']}/complete", {"output_upload_id":output_id,"preview_upload_id":preview_id,"duration_seconds":per_frame_duration,"logs":log_text}, headers={"X-Lease-Token":lease["lease_token"]})
+            shutil.rmtree(Path(entry["output"]).parent, ignore_errors=True)
     finally:
         stopped.set()
         thread.join(timeout=2)
@@ -338,11 +372,11 @@ def render(api: Api, config: dict, lease: dict) -> None:
 
 def enroll(args) -> None:
     server = args.server.rstrip("/")
-    body = {"code":args.code.upper(),"name":args.name or platform.node() or "worker","capabilities":capabilities(args.device)}
+    body = {"code":args.code.upper(),"name":args.name or platform.node() or "worker","capabilities":capabilities(args.device, args.batch_size)}
     response = httpx.post(server + "/api/v1/worker/enroll", json=body, timeout=30)
     response.raise_for_status()
     result = response.json()
-    save_config({"server_url":server,"worker_id":result["worker_id"],"token":result["token"],"device":args.device,"cache_gb":args.cache_gb})
+    save_config({"server_url":server,"worker_id":result["worker_id"],"token":result["token"],"device":args.device,"cache_gb":args.cache_gb,"batch_size":args.batch_size})
     print(f"Enrolled {body['name']} as {result['worker_id']}. Configuration saved to {CONFIG_FILE}")
 
 
@@ -353,15 +387,17 @@ def run_worker(_args) -> None:
     while True:
         lease = None
         try:
-            heartbeat = api.post("/api/v1/worker/heartbeat", {"capabilities":capabilities(config.get("device", "AUTO"))}).json()
+            batch_size = min(max(int(config.get("batch_size", 5)), 1), 20)
+            heartbeat = api.post("/api/v1/worker/heartbeat", {"capabilities":capabilities(config.get("device", "AUTO"), batch_size)}).json()
             ensure_blender(heartbeat["blender_version"])
-            response = api.post("/api/v1/worker/lease?wait=20")
+            response = api.post(f"/api/v1/worker/lease?wait=20&count={batch_size}")
             if response.status_code == 204:
                 time.sleep(random.uniform(1, 3))
                 continue
-            lease = response.json()
-            print(f"Leased frame {lease['frame']} ({lease['frame_id']})", flush=True)
-            render(api, config, lease)
+            leases = response.json()["assignments"]
+            lease = leases[0]
+            print(f"Leased {len(leases)} frames: {', '.join(str(item['frame']) for item in leases)}", flush=True)
+            render_batch(api, config, leases)
         except KeyboardInterrupt:
             print("Stopping worker.")
             return
@@ -369,21 +405,22 @@ def run_worker(_args) -> None:
             details = traceback.format_exc()
             print(f"Worker error: {exc}\n{details}Retrying…", file=sys.stderr, flush=True)
             if lease:
-                try:
-                    api.post(
-                        f"/api/v1/worker/leases/{lease['frame_id']}/fail",
-                        {"error": f"Worker preparation error: {exc}", "logs": details[-65536:]},
-                        headers={"X-Lease-Token": lease["lease_token"]},
-                    )
-                except Exception as report_error:
-                    print(f"Could not report failed lease: {report_error}", file=sys.stderr, flush=True)
+                for assigned in locals().get("leases", [lease]):
+                    try:
+                        api.post(
+                            f"/api/v1/worker/leases/{assigned['frame_id']}/fail",
+                            {"error": f"Worker preparation error: {exc}", "logs": details[-65536:]},
+                            headers={"X-Lease-Token": assigned["lease_token"]},
+                        )
+                    except Exception as report_error:
+                        print(f"Could not report failed lease: {report_error}", file=sys.stderr, flush=True)
             time.sleep(random.uniform(5, 15))
 
 
 def doctor(_args) -> None:
     config = load_config()
     api = Api(config)
-    result = api.post("/api/v1/worker/heartbeat", {"capabilities":capabilities(config.get("device", "AUTO"))}).json()
+    result = api.post("/api/v1/worker/heartbeat", {"capabilities":capabilities(config.get("device", "AUTO"), int(config.get("batch_size", 5)))}).json()
     blender = ensure_blender(result["blender_version"])
     device = config.get("device", "AUTO")
     probe = Path(__file__).with_name("blender_probe.py")
@@ -395,7 +432,7 @@ def doctor(_args) -> None:
     if check.returncode != 0 or "BLEND_FARM_PROBE=" not in probe_output:
         raise WorkerError(f"Blender {device} device check failed:\n{probe_output[-8000:]}")
     print(probe_output)
-    print(json.dumps({"server":"ok","blender":str(blender),"blender_version":result["blender_version"],"capabilities":capabilities(device)}, indent=2))
+    print(json.dumps({"server":"ok","blender":str(blender),"blender_version":result["blender_version"],"capabilities":capabilities(device, int(config.get("batch_size", 5)))}, indent=2))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -407,6 +444,7 @@ def build_parser() -> argparse.ArgumentParser:
     enroll_cmd.add_argument("--name")
     enroll_cmd.add_argument("--device", choices=["AUTO","CPU","CUDA","OPTIX","HIP"], default="AUTO")
     enroll_cmd.add_argument("--cache-gb", type=int, default=50)
+    enroll_cmd.add_argument("--batch-size", type=int, default=5)
     enroll_cmd.set_defaults(function=enroll)
     run_cmd = commands.add_parser("run", help="start requesting frames")
     run_cmd.set_defaults(function=run_worker)

@@ -61,3 +61,19 @@ def test_queue_order_and_pause(tmp_path):
         db.add(Frame(job_id=second.id, frame_number=7))
     lease = Scheduler(sessions).lease(worker)
     assert lease["frame"] == 7
+
+
+def test_batch_leases_consecutive_frames_from_only_one_job(tmp_path):
+    sessions, worker = setup_farm(tmp_path)
+    with sessions.begin() as db:
+        second = Job(name="next", frame_start=10, frame_end=10, output_format="PNG", package_key="p2", package_sha256="d" * 64, blend_path="other.blend", queue_order=2)
+        db.add(second)
+        db.flush()
+        db.add(Frame(job_id=second.id, frame_number=10))
+
+    leases = Scheduler(sessions).lease_batch(worker, 5)
+
+    assert [lease["frame"] for lease in leases] == [1, 2]
+    assert len({lease["job_id"] for lease in leases}) == 1
+    assert len({lease["lease_token"] for lease in leases}) == 2
+    assert Scheduler(sessions).lease(worker)["frame"] == 10

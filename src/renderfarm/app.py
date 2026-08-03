@@ -463,16 +463,18 @@ async def worker_heartbeat(request: Request, worker: Worker = Depends(worker_req
 
 
 @app.post("/api/v1/worker/lease")
-async def acquire_lease(wait: int = 20, worker: Worker = Depends(worker_required), db: Session = Depends(db_session)):
+async def acquire_lease(wait: int = 20, count: int = 1, worker: Worker = Depends(worker_required), db: Session = Depends(db_session)):
     worker.last_seen_at = utcnow()
     db.commit()
     deadline = asyncio.get_running_loop().time() + min(max(wait, 0), 20)
     while True:
-        result = await asyncio.to_thread(scheduler.lease, worker)
-        if result:
-            result["package_url"] = f"{settings.public_url}/api/v1/worker/package/{result['frame_id']}"
-            result["blender_version"] = db.get(FarmSetting, "blender_version").value
-            return result
+        results = await asyncio.to_thread(scheduler.lease_batch, worker, min(max(count, 1), 20))
+        if results:
+            version = db.get(FarmSetting, "blender_version").value
+            for result in results:
+                result["package_url"] = f"{settings.public_url}/api/v1/worker/package/{result['frame_id']}"
+                result["blender_version"] = version
+            return {"assignments": results} if count > 1 else results[0]
         if asyncio.get_running_loop().time() >= deadline:
             return Response(status_code=204)
         await asyncio.sleep(1)

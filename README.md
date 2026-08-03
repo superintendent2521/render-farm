@@ -72,7 +72,7 @@ blend-farm-worker doctor
 blend-farm-worker run
 ```
 
-Supported device choices are `AUTO`, `CPU`, `CUDA`, `OPTIX`, and `HIP`. The worker reports its configured choice; jobs do not override it. `AUTO` preserves Blender's normal device behavior.
+Supported device choices are `AUTO`, `CPU`, `CUDA`, `OPTIX`, and `HIP`. The worker reports its configured choice; jobs do not override it. `AUTO` preserves Blender's normal device behavior. Workers render five consecutive frames per Blender launch by default; use `--batch-size 1..20` during enrollment (or `BATCH_SIZE` in the Colab notebook) to tune the balance between scene-loading overhead and redistribution latency.
 
 The configuration and credential are saved with user-only permissions where the platform supports them. Projects are cached by SHA-256 and evicted least-recently-used when the configured cache limit is exceeded. Each process renders one frame at once; run separately enrolled worker instances to use multiple GPUs concurrently.
 
