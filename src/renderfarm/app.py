@@ -173,18 +173,18 @@ def health():
 def login_page(request: Request):
     if request.session.get("admin_id"):
         return RedirectResponse("/", 303)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(request=request, name="login.html", context={"request": request, "error": None})
 
 
 @app.post("/login")
 def login(request: Request, username: str = Form(...), password: str = Form(...), db: Session = Depends(db_session)):
     client = request.client.host if request.client else "unknown"
     if not limiter.allowed(client):
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Too many attempts. Try again later."}, status_code=429)
+        return templates.TemplateResponse(request=request, name="login.html", context={"request": request, "error": "Too many attempts. Try again later."}, status_code=429)
     admin = db.scalar(select(Admin).where(Admin.username == username))
     if not admin or not verify_password(admin.password_hash, password):
         limiter.fail(client)
-        return templates.TemplateResponse("login.html", {"request": request, "error": "Invalid username or password."}, status_code=401)
+        return templates.TemplateResponse(request=request, name="login.html", context={"request": request, "error": "Invalid username or password."}, status_code=401)
     limiter.clear(client)
     request.session.clear()
     request.session["admin_id"] = admin.id
@@ -199,7 +199,10 @@ def logout(request: Request, _admin: Admin = Depends(admin_required), _csrf=Depe
 
 
 @app.get("/", response_class=HTMLResponse)
-def dashboard(request: Request, _admin: Admin = Depends(admin_required), db: Session = Depends(db_session)):
+def dashboard(request: Request, db: Session = Depends(db_session)):
+    admin_id = request.session.get("admin_id")
+    if not admin_id or not db.get(Admin, admin_id):
+        return RedirectResponse("/login", 303)
     jobs = db.scalars(select(Job).order_by(Job.queue_order, Job.created_at.desc())).all()
     workers = db.scalars(select(Worker).order_by(Worker.created_at.desc())).all()
     version = db.get(FarmSetting, "blender_version").value
@@ -213,7 +216,7 @@ def dashboard(request: Request, _admin: Admin = Depends(admin_required), db: Ses
                 tunnel_status = "connected" if response.status == 200 else "degraded"
         except Exception:
             tunnel_status = "disconnected"
-    return templates.TemplateResponse("dashboard.html", session_json(request, jobs=jobs, workers=workers, active_frames=active_frames, version=version, usage=usage, counts=counts, public_url=settings.public_url, storage_backend=settings.storage_backend, exposure_mode=settings.exposure_mode, tunnel_status=tunnel_status))
+    return templates.TemplateResponse(request=request, name="dashboard.html", context=session_json(request, jobs=jobs, workers=workers, active_frames=active_frames, version=version, usage=usage, counts=counts, public_url=settings.public_url, storage_backend=settings.storage_backend, exposure_mode=settings.exposure_mode, tunnel_status=tunnel_status))
 
 
 @app.get("/jobs/{job_id}", response_class=HTMLResponse)
@@ -222,7 +225,7 @@ def job_detail(job_id: str, request: Request, _admin: Admin = Depends(admin_requ
     if not job:
         raise HTTPException(404)
     frames = db.scalars(select(Frame).where(Frame.job_id == job_id).order_by(Frame.frame_number)).all()
-    return templates.TemplateResponse("job.html", session_json(request, job=job, frames=frames))
+    return templates.TemplateResponse(request=request, name="job.html", context=session_json(request, job=job, frames=frames))
 
 
 @app.post("/jobs")

@@ -49,6 +49,12 @@ Local storage is the default and needs no additional service. Projects and outpu
 
 ## Install and enroll a worker
 
+For Google Colab, open [the ready-to-run worker notebook](notebooks/colab_worker.ipynb) or launch it directly after pushing this repository:
+
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/superintendent2521/render-farm/blob/main/notebooks/colab_worker.ipynb)
+
+Select a GPU runtime, enter a unique worker name, and run its cells in order. Each Colab runtime requires its own one-time enrollment code.
+
 Install Python 3.10 or later on Windows or Linux:
 
 ```bash
@@ -109,4 +115,3 @@ pytest
 ```
 
 For production, always replace `ADMIN_PASSWORD` and `SECRET_KEY`. Workers process trusted administrator projects but the rendering host can necessarily inspect their assets; do not enroll machines you do not trust with those assets.
-
