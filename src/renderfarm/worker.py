@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import traceback
 from pathlib import Path, PurePosixPath
 from zipfile import ZipFile
 
@@ -186,10 +187,12 @@ def download_project(api: Api, lease: dict) -> Path:
     ready = root / ".ready"
     if ready.exists():
         os.utime(ready, None)
+        print(f"Using cached project {lease['package_sha256'][:12]}…", flush=True)
         return root
     shutil.rmtree(root, ignore_errors=True)
     root.mkdir(parents=True)
     archive = root / "project.zip"
+    print(f"Downloading project {lease['package_sha256'][:12]}…", flush=True)
     request = api.client.build_request("GET", lease["package_url"], headers={"X-Lease-Token":lease["lease_token"]})
     response = api.client.send(request, stream=True)
     remote_client = None
@@ -216,6 +219,7 @@ def download_project(api: Api, lease: dict) -> Path:
     safe_extract_zip(archive, root)
     archive.unlink()
     ready.write_text(lease["package_sha256"])
+    print(f"Project extracted to {root}", flush=True)
     return root
 
 
@@ -295,7 +299,7 @@ def render(api: Api, config: dict, lease: dict) -> None:
         preview = output_dir / f"frame-{lease['frame']:06d}-preview.jpg"
         runner = Path(__file__).with_name("blender_runner.py")
         command = [str(blender), "--disable-autoexec", "-b", str(blend), "--python-exit-code", "1", "--python", str(runner), "--", str(lease["frame"]), str(output), lease["output_format"], str(preview), config.get("device", "AUTO")]
-        print(f"Rendering job {lease['job_id']} frame {lease['frame']}…")
+        print(f"Launching Blender for job {lease['job_id']} frame {lease['frame']}…", flush=True)
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
         process_holder.append(process)
     except Exception:
@@ -347,6 +351,7 @@ def run_worker(_args) -> None:
     api = Api(config)
     print(f"Blend Farm worker {__version__} connected to {api.base}")
     while True:
+        lease = None
         try:
             heartbeat = api.post("/api/v1/worker/heartbeat", {"capabilities":capabilities(config.get("device", "AUTO"))}).json()
             ensure_blender(heartbeat["blender_version"])
@@ -354,12 +359,24 @@ def run_worker(_args) -> None:
             if response.status_code == 204:
                 time.sleep(random.uniform(1, 3))
                 continue
-            render(api, config, response.json())
+            lease = response.json()
+            print(f"Leased frame {lease['frame']} ({lease['frame_id']})", flush=True)
+            render(api, config, lease)
         except KeyboardInterrupt:
             print("Stopping worker.")
             return
-        except (httpx.HTTPError, WorkerError, OSError) as exc:
-            print(f"Worker error: {exc}; retrying…", file=sys.stderr)
+        except Exception as exc:
+            details = traceback.format_exc()
+            print(f"Worker error: {exc}\n{details}Retrying…", file=sys.stderr, flush=True)
+            if lease:
+                try:
+                    api.post(
+                        f"/api/v1/worker/leases/{lease['frame_id']}/fail",
+                        {"error": f"Worker preparation error: {exc}", "logs": details[-65536:]},
+                        headers={"X-Lease-Token": lease["lease_token"]},
+                    )
+                except Exception as report_error:
+                    print(f"Could not report failed lease: {report_error}", file=sys.stderr, flush=True)
             time.sleep(random.uniform(5, 15))
 
 
