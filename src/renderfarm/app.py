@@ -225,7 +225,11 @@ def job_detail(job_id: str, request: Request, _admin: Admin = Depends(admin_requ
     if not job:
         raise HTTPException(404)
     frames = db.scalars(select(Frame).where(Frame.job_id == job_id).order_by(Frame.frame_number)).all()
-    return templates.TemplateResponse(request=request, name="job.html", context=session_json(request, job=job, frames=frames))
+    return templates.TemplateResponse(
+        request=request,
+        name="job.html",
+        context=session_json(request, job=job, frames=frames, has_failed_frames=any(frame.status == FrameStatus.failed.value for frame in frames)),
+    )
 
 
 @app.post("/jobs")

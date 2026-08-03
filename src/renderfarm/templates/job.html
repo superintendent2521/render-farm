@@ -6,7 +6,7 @@
 {% if job.status in ['completed','failed'] %}<a class="button" href="/jobs/{{ job.id }}/results">Download ZIP</a>{% endif %}
 {% if job.status == 'paused' %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="resume"><button>Resume</button></form>{% elif job.status in ['queued','running'] %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="pause"><button class="quiet">Pause</button></form>{% endif %}
 {% if job.status not in ['completed','failed','cancelled'] %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="cancel"><button class="danger">Cancel</button></form>{% endif %}
-{% if job.status == 'failed' %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="retry"><button>Retry failed</button></form>{% endif %}
+{% if has_failed_frames %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="retry"><button>Retry failed</button></form>{% endif %}
 </div></section>
 <section class="card"><div class="frame-grid">
 {% for frame in frames %}<article class="frame {{ frame.status }}">

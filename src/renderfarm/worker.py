@@ -203,14 +203,14 @@ def download_project(api: Api, lease: dict) -> Path:
         remote_client = httpx.Client(timeout=600)
         response = remote_client.send(httpx.Request("GET", remote_url), stream=True)
     try:
-        with response:
-            response.raise_for_status()
-            digest = hashlib.sha256()
-            with archive.open("wb") as output:
-                for chunk in response.iter_bytes(1024 * 1024):
-                    digest.update(chunk)
-                    output.write(chunk)
+        response.raise_for_status()
+        digest = hashlib.sha256()
+        with archive.open("wb") as output:
+            for chunk in response.iter_bytes(1024 * 1024):
+                digest.update(chunk)
+                output.write(chunk)
     finally:
+        response.close()
         if remote_client:
             remote_client.close()
     if digest.hexdigest() != lease["package_sha256"]:
