@@ -294,7 +294,7 @@ def render(api: Api, config: dict, lease: dict) -> None:
         output = output_dir / f"frame-{lease['frame']:06d}.{extension}"
         preview = output_dir / f"frame-{lease['frame']:06d}-preview.jpg"
         runner = Path(__file__).with_name("blender_runner.py")
-        command = [str(blender), "--disable-autoexec", "-b", str(blend), "--python", str(runner), "--", str(lease["frame"]), str(output), lease["output_format"], str(preview), config.get("device", "AUTO")]
+        command = [str(blender), "--disable-autoexec", "-b", str(blend), "--python-exit-code", "1", "--python", str(runner), "--", str(lease["frame"]), str(output), lease["output_format"], str(preview), config.get("device", "AUTO")]
         print(f"Rendering job {lease['job_id']} frame {lease['frame']}…")
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
         process_holder.append(process)
@@ -368,7 +368,17 @@ def doctor(_args) -> None:
     api = Api(config)
     result = api.post("/api/v1/worker/heartbeat", {"capabilities":capabilities(config.get("device", "AUTO"))}).json()
     blender = ensure_blender(result["blender_version"])
-    print(json.dumps({"server":"ok","blender":str(blender),"blender_version":result["blender_version"],"capabilities":capabilities(config.get("device", "AUTO"))}, indent=2))
+    device = config.get("device", "AUTO")
+    probe = Path(__file__).with_name("blender_probe.py")
+    check = subprocess.run(
+        [str(blender), "--background", "--factory-startup", "--python-exit-code", "1", "--python", str(probe), "--", device],
+        capture_output=True, text=True, errors="replace", timeout=120, check=False,
+    )
+    probe_output = (check.stdout + "\n" + check.stderr).strip()
+    if check.returncode != 0 or "BLEND_FARM_PROBE=" not in probe_output:
+        raise WorkerError(f"Blender {device} device check failed:\n{probe_output[-8000:]}")
+    print(probe_output)
+    print(json.dumps({"server":"ok","blender":str(blender),"blender_version":result["blender_version"],"capabilities":capabilities(device)}, indent=2))
 
 
 def build_parser() -> argparse.ArgumentParser:

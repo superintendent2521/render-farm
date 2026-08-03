@@ -5,6 +5,8 @@ import sys
 
 import bpy
 
+from renderfarm.blender_device import configure_cycles_device
+
 
 def main() -> None:
     args = sys.argv[sys.argv.index("--") + 1:]
@@ -15,16 +17,8 @@ def main() -> None:
     scene.frame_set(int(frame))
     scene.render.filepath = output
     scene.render.image_settings.file_format = output_format
-    if scene.render.engine == "CYCLES" and device != "AUTO":
-        scene.cycles.device = "CPU" if device == "CPU" else "GPU"
-        prefs = bpy.context.preferences.addons["cycles"].preferences
-        try:
-            prefs.compute_device_type = device
-            prefs.get_devices()
-            for item in prefs.devices:
-                item.use = item.type == device
-        except Exception as exc:
-            print(f"Device configuration warning: {exc}")
+    prefs = bpy.context.preferences.addons["cycles"].preferences
+    configure_cycles_device(scene, prefs, device)
     bpy.ops.render.render(write_still=True)
     scene.render.image_settings.file_format = "JPEG"
     scene.render.image_settings.color_mode = "RGB"
@@ -34,4 +28,3 @@ def main() -> None:
 
 
 main()
-
