@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Log in · Blend Farm{% endblock %}
+{% block content %}
+<section class="login-card card">
+  <p class="eyebrow">CENTRAL SERVER</p>
+  <h1>Welcome back</h1>
+  <p class="muted">Sign in to manage jobs and workers.</p>
+  {% if error %}<div class="alert bad">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="stack">
+    <label>Username<input name="username" required autocomplete="username"></label>
+    <label>Password<input type="password" name="password" required autocomplete="current-password"></label>
+    <button>Log in</button>
+  </form>
+</section>
+{% endblock %}
+

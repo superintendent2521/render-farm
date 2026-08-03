@@ -1,0 +1,7 @@
+FROM nginx:1.27-alpine
+RUN apk add --no-cache openssl gettext
+COPY direct.conf.template /etc/nginx/templates/direct.conf.template
+COPY direct-entrypoint.sh /direct-entrypoint.sh
+RUN chmod +x /direct-entrypoint.sh
+ENTRYPOINT ["/direct-entrypoint.sh"]
+

@@ -1,0 +1,5 @@
+FROM nginx:1.27-alpine
+RUN apk add --no-cache openssl
+COPY tunnel.conf /etc/nginx/conf.d/default.conf
+RUN mkdir -p /etc/nginx/local && openssl req -x509 -nodes -newkey rsa:2048 -days 3650 -subj "/CN=blend-farm.local" -keyout /etc/nginx/local/privkey.pem -out /etc/nginx/local/fullchain.pem >/dev/null 2>&1
+

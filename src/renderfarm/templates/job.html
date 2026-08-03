@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}{{ job.name }} · Blend Farm{% endblock %}
+{% block content %}
+<section class="page-head"><div><a class="muted" href="/">← Queue</a><h1>{{ job.name }}</h1><p class="muted">Frames {{ job.frame_start }}–{{ job.frame_end }} · {{ job.output_format }} · <span class="pill {{ job.status }}">{{ job.status }}</span></p></div>
+<div class="actions">
+{% if job.status in ['completed','failed'] %}<a class="button" href="/jobs/{{ job.id }}/results">Download ZIP</a>{% endif %}
+{% if job.status == 'paused' %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="resume"><button>Resume</button></form>{% elif job.status in ['queued','running'] %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="pause"><button class="quiet">Pause</button></form>{% endif %}
+{% if job.status not in ['completed','failed','cancelled'] %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="cancel"><button class="danger">Cancel</button></form>{% endif %}
+{% if job.status == 'failed' %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="retry"><button>Retry failed</button></form>{% endif %}
+</div></section>
+<section class="card"><div class="frame-grid">
+{% for frame in frames %}<article class="frame {{ frame.status }}">
+  {% if frame.preview_key %}<img src="/frames/{{ frame.id }}/preview" loading="lazy" alt="Frame {{ frame.frame_number }}">{% else %}<div class="frame-placeholder">{{ frame.frame_number }}</div>{% endif %}
+  <div class="frame-meta"><strong>#{{ frame.frame_number }}</strong><span class="pill {{ frame.status }}">{{ frame.status }}</span></div>
+  {% if frame.duration_seconds %}<small>{{ '%.1f'|format(frame.duration_seconds) }} sec</small>{% endif %}
+  {% if frame.error_text %}<details><summary>Error</summary><pre>{{ frame.error_text }}\n{{ frame.log_text }}</pre></details>{% endif %}
+  {% if frame.log_text and not frame.error_text %}<details><summary>Render log</summary><pre>{{ frame.log_text }}</pre></details>{% endif %}
+</article>{% endfor %}
+</div></section>
+<section class="card danger-zone"><h2>Delete job</h2><p class="muted">This permanently removes the project, frames, previews, logs, and result archive.</p><form method="post" action="/jobs/{{ job.id }}/delete?csrf={{ csrf }}" class="inline-form"><input name="confirm" placeholder="Type {{ job.name }}" required><button class="danger">Delete permanently</button></form></section>
+{% endblock %}

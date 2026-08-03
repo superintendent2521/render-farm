@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div><p class="eyebrow">RENDER CONTROL</p><h1>Your farm at a glance</h1><p class="muted">{{ public_url }} · {{ storage_backend|upper }} storage{% if exposure_mode == 'cloudflare' %} · Tunnel {{ tunnel_status }}{% endif %}</p></div>
+  <div class="metric"><strong>{{ workers|length }}</strong><span>workers</span></div>
+  <div class="metric"><strong>{{ jobs|length }}</strong><span>jobs</span></div>
+  <div class="metric"><strong>{% if usage is not none %}{{ '%.1f'|format(usage / 1073741824) }} GB{% else %}—{% endif %}</strong><span>stored</span></div>
+</section>
+
+{% if request.session.get('enrollment_code') %}
+<div class="alert good">Enrollment code: <code>{{ request.session.pop('enrollment_code') }}</code> (valid for 10 minutes)</div>
+{% endif %}
+
+<div class="layout">
+  <section class="card main-panel">
+    <div class="section-head"><div><p class="eyebrow">QUEUE</p><h2>Render jobs</h2></div><button data-dialog="new-job">New job</button></div>
+    {% if jobs %}
+    <div class="job-list">
+      {% for job in jobs %}
+      {% set c = counts[job.id] %}
+      {% set done = c.get('succeeded', 0) %}
+      {% set total = (job.frame_end - job.frame_start + 1) %}
+      <article class="job-row">
+        <div class="grow"><a href="/jobs/{{ job.id }}"><strong>{{ job.name }}</strong></a><div class="muted small">Frames {{ job.frame_start }}–{{ job.frame_end }} · {{ job.output_format }}</div><progress value="{{ done }}" max="{{ total }}"></progress></div>
+        <span class="pill {{ job.status }}">{{ job.status }}</span>
+        <span class="fraction">{{ done }}/{{ total }}</span>
+        <div class="actions">
+          <form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="up"><button class="icon" title="Move up">↑</button></form>
+          <form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="down"><button class="icon" title="Move down">↓</button></form>
+          {% if job.status == 'paused' %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="resume"><button class="quiet">Resume</button></form>{% elif job.status in ['queued','running'] %}<form method="post" action="/jobs/{{ job.id }}/action?csrf={{ csrf }}"><input type="hidden" name="action" value="pause"><button class="quiet">Pause</button></form>{% endif %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+    {% else %}<div class="empty"><strong>No jobs yet</strong><p>Package a Blender project and send its frames to your workers.</p></div>{% endif %}
+  </section>
+
+  <aside class="stack">
+    <section class="card">
+      <div class="section-head"><div><p class="eyebrow">WORKERS</p><h2>Nodes</h2></div><form method="post" action="/workers/enrollment?csrf={{ csrf }}"><button class="quiet">Enroll</button></form></div>
+      {% if workers %}{% for worker in workers %}
+      <div class="worker-row"><span class="status-dot {% if worker.disabled %}off{% elif worker.last_seen_at %}on{% endif %}"></span><div class="grow"><strong>{{ worker.name }}</strong><div class="muted small">{% if worker.disabled %}Disabled{% elif active_frames[worker.id] %}Rendering frame {{ active_frames[worker.id].frame_number }}{% elif worker.last_seen_at %}Last seen {{ worker.last_seen_at.strftime('%Y-%m-%d %H:%M UTC') }}{% else %}Never connected{% endif %}</div><details><summary class="muted small">Capabilities</summary><pre>{{ worker.capabilities_json }}</pre><form method="post" action="/workers/{{ worker.id }}/rename?csrf={{ csrf }}" class="inline-form"><input name="name" value="{{ worker.name }}" required><button class="quiet">Rename</button></form></details></div><form method="post" action="/workers/{{ worker.id }}/toggle?csrf={{ csrf }}"><button class="icon">{% if worker.disabled %}↻{% else %}×{% endif %}</button></form></div>
+      {% endfor %}{% else %}<p class="muted">Create an enrollment code, then run <code>blend-farm-worker enroll</code>.</p>{% endif %}
+    </section>
+    <section class="card">
+      <p class="eyebrow">FARM SETTINGS</p><h2>Blender</h2>
+      <form method="post" action="/settings?csrf={{ csrf }}" class="inline-form"><input name="blender_version" value="{{ version }}" required><button>Save</button></form>
+      <p class="muted small">Workers replace their portable Blender build when this changes.</p>
+    </section>
+  </aside>
+</div>
+
+<dialog id="new-job">
+  <form method="dialog"><button class="dialog-close">×</button></form>
+  <p class="eyebrow">NEW JOB</p><h2>Render a project</h2>
+  <form id="job-form" method="post" action="/jobs?csrf={{ csrf }}" class="stack">
+    <label>Job name<input name="name" required maxlength="160"></label>
+    <label>Packaged project (.zip)<input id="project-file" type="file" accept=".zip,application/zip" required></label>
+    <div id="upload-status" class="muted small">The ZIP must contain exactly one .blend file.</div>
+    <input id="upload-id" type="hidden" name="upload_id">
+    <div class="field-grid"><label>First frame<input type="number" name="frame_start" value="1" required></label><label>Last frame<input type="number" name="frame_end" value="250" required></label></div>
+    <label>Output format<select name="output_format"><option>PNG</option><option>JPEG</option><option value="OPEN_EXR">OpenEXR</option></select></label>
+    <button id="submit-job" disabled>Create job</button>
+  </form>
+</dialog>
+{% endblock %}

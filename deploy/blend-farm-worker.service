@@ -1,0 +1,17 @@
+[Unit]
+Description=Blend Farm worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+ExecStart=/home/YOUR_USER/blend-farm/.venv/bin/python -m renderfarm.worker run
+Restart=always
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
+
